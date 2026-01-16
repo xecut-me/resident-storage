@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Resident Storage</title>
+    <style>
+        body { font-family: sans-serif; margin: 20px; }
+        header { display: flex; gap: 20px; align-items: center; margin-bottom: 20px; }
+        table { border-collapse: collapse; margin-top: 10px; }
+        th, td { border: 1px solid #ccc; padding: 8px; }
+        input[type="text"] { width: 150px; }
+        .vpn-table { margin: 5px 0; }
+        .vpn-table input { width: 120px; }
+        .fee-table input[type="text"], .fee-table input[type="date"] { width: 100px; }
+        .fee-table input[type="number"] { width: 80px; }
+        button { cursor: pointer; }
+        #error { color: red; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <header>
+        <button id="authBtn"></button>
+        <a href="/docs">Swagger UI</a>
+        <span id="accessLevel"></span>
+    </header>
+    <div id="error"></div>
+    <div id="content"></div>
+
+    <script>
+        const $ = id => document.getElementById(id);
+        let permissions = { edit: false, new: false };
+
+        function updateAuthBtn() {
+            const key = localStorage.getItem('apiKey');
+            $('authBtn').textContent = key ? 'Logout' : 'Login';
+        }
+
+        $('authBtn').onclick = () => {
+            if (localStorage.getItem('apiKey')) {
+                localStorage.removeItem('apiKey');
+            } else {
+                const key = prompt('Enter API key:');
+                if (key) localStorage.setItem('apiKey', key);
+            }
+            updateAuthBtn();
+            loadAccounts();
+        };
+
+        async function fetchMe() {
+            const key = localStorage.getItem('apiKey');
+            $('accessLevel').innerText = '';
+            permissions = { edit: false, new: false };
+            if (!key) return;
+            try {
+                const res = await fetch('/me', {
+                    headers: { 'Authorization': 'Bearer ' + key }
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    $('accessLevel').innerText = data.access;
+                    permissions = { edit: data.edit, new: data.new };
+                }
+            } catch (e) {}
+        }
+
+        function showError(msg) {
+            $('error').innerText = 'error: ' + msg;
+        }
+
+        async function api(method, body) {
+            const key = localStorage.getItem('apiKey');
+            if (!key) { showError('Not logged in'); return null; }
+            try {
+                const res = await fetch('/accounts', {
+                    method,
+                    headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json' },
+                    body: body ? JSON.stringify(body) : undefined
+                });
+                if (!res.ok) {
+                    const text = await res.text();
+                    showError(text);
+                    return null;
+                }
+                return res.json();
+            } catch (e) {
+                showError(e.message);
+                return null;
+            }
+        }
+
+        function createVpnTable(vpns, onChange) {
+            const container = document.createElement('div');
+
+            function render() {
+                container.innerHTML = '';
+                const table = document.createElement('table');
+                table.className = 'vpn-table';
+
+                vpns.forEach((vpn, i) => {
+                    const tr = document.createElement('tr');
+
+                    const ipTd = document.createElement('td');
+                    const ipInput = document.createElement('input');
+                    ipInput.type = 'text';
+                    ipInput.value = vpn.ip;
+                    ipInput.placeholder = '192.168.11.x';
+                    ipInput.oninput = () => { vpn.ip = ipInput.value; onChange(); };
+                    ipTd.appendChild(ipInput);
+
+                    const wgTd = document.createElement('td');
+                    const wgInput = document.createElement('input');
+                    wgInput.type = 'text';
+                    wgInput.value = vpn.wg_public_key;
+                    wgInput.placeholder = 'WG public key';
+                    wgInput.oninput = () => { vpn.wg_public_key = wgInput.value; onChange(); };
+                    wgTd.appendChild(wgInput);
+
+                    const delTd = document.createElement('td');
+                    const delBtn = document.createElement('button');
+                    delBtn.textContent = 'X';
+                    delBtn.onclick = () => { vpns.splice(i, 1); render(); onChange(); };
+                    delTd.appendChild(delBtn);
+
+                    tr.append(ipTd, wgTd, delTd);
+                    table.appendChild(tr);
+                });
+
+                container.appendChild(table);
+
+                const addBtn = document.createElement('button');
+                addBtn.textContent = '+ VPN';
+                addBtn.onclick = () => { vpns.push({ ip: '192.168.11.', wg_public_key: '' }); render(); onChange(); };
+                container.appendChild(addBtn);
+            }
+
+            render();
+            return container;
+        }
+
+        function createFeeTable(fees, onChange) {
+            const container = document.createElement('div');
+            const currencies = ['RSD', 'EUR', 'USD', 'RUB', 'ETH', 'BTC'];
+
+            function render() {
+                container.innerHTML = '';
+                const table = document.createElement('table');
+                table.className = 'fee-table';
+
+                fees.forEach((fee, i) => {
+                    const tr = document.createElement('tr');
+
+                    const dateTd = document.createElement('td');
+                    const dateInput = document.createElement('input');
+                    dateInput.type = 'date';
+                    dateInput.value = fee.date;
+                    dateInput.oninput = () => { fee.date = dateInput.value; onChange(); };
+                    dateTd.appendChild(dateInput);
+
+                    const currTd = document.createElement('td');
+                    const currSelect = document.createElement('select');
+                    currencies.forEach(c => {
+                        const opt = document.createElement('option');
+                        opt.value = c;
+                        opt.innerText = c;
+                        if (c === fee.currency) opt.selected = true;
+                        currSelect.appendChild(opt);
+                    });
+                    currSelect.onchange = () => { fee.currency = currSelect.value; onChange(); };
+                    currTd.appendChild(currSelect);
+
+                    const amtTd = document.createElement('td');
+                    const amtInput = document.createElement('input');
+                    amtInput.type = 'number';
+                    amtInput.step = '0.01';
+                    amtInput.value = fee.amount;
+                    amtInput.oninput = () => { fee.amount = parseFloat(amtInput.value) || 0; onChange(); };
+                    amtTd.appendChild(amtInput);
+
+                    const delTd = document.createElement('td');
+                    const delBtn = document.createElement('button');
+                    delBtn.textContent = 'X';
+                    delBtn.onclick = () => { fees.splice(i, 1); render(); onChange(); };
+                    delTd.appendChild(delBtn);
+
+                    tr.append(dateTd, currTd, amtTd, delTd);
+                    table.appendChild(tr);
+                });
+
+                container.appendChild(table);
+
+                const addBtn = document.createElement('button');
+                addBtn.textContent = '+ Fee';
+                addBtn.onclick = () => { fees.push({ date: '', currency: 'RSD', amount: 0 }); render(); onChange(); };
+                container.appendChild(addBtn);
+            }
+
+            render();
+            return container;
+        }
+
+        function renderTable(data) {
+            $('content').innerHTML = '';
+            const accounts = data.accounts;
+
+            const table = document.createElement('table');
+            const thead = document.createElement('thead');
+            const headerRow = document.createElement('tr');
+            ['Username', 'Telegram', 'Decentrala', 'Resident', 'OTP Prefix', 'VPN', 'Fee Payments', ''].forEach(text => {
+                const th = document.createElement('th');
+                th.innerText = text;
+                headerRow.appendChild(th);
+            });
+            thead.appendChild(headerRow);
+            table.appendChild(thead);
+
+            const tbody = document.createElement('tbody');
+
+            function addRow(acc) {
+                const tr = document.createElement('tr');
+
+                const usernameTd = document.createElement('td');
+                const usernameInput = document.createElement('input');
+                usernameInput.type = 'text';
+                usernameInput.value = acc.username;
+                usernameInput.oninput = () => { acc.username = usernameInput.value; };
+                usernameTd.appendChild(usernameInput);
+
+                const telegramTd = document.createElement('td');
+                const telegramInput = document.createElement('input');
+                telegramInput.type = 'text';
+                telegramInput.value = acc.telegram || '';
+                telegramInput.oninput = () => { acc.telegram = telegramInput.value || null; };
+                telegramTd.appendChild(telegramInput);
+
+                const decentralaTd = document.createElement('td');
+                const decentralaInput = document.createElement('input');
+                decentralaInput.type = 'checkbox';
+                decentralaInput.checked = acc.decentrala;
+                decentralaInput.onchange = () => { acc.decentrala = decentralaInput.checked; };
+                decentralaTd.appendChild(decentralaInput);
+
+                const residentTd = document.createElement('td');
+                const residentInput = document.createElement('input');
+                residentInput.type = 'checkbox';
+                residentInput.checked = acc.resident;
+                residentInput.onchange = () => { acc.resident = residentInput.checked; };
+                residentTd.appendChild(residentInput);
+
+                const otpTd = document.createElement('td');
+                const otpInput = document.createElement('input');
+                otpInput.type = 'text';
+                otpInput.value = acc.otp_prefix || '';
+                otpInput.oninput = () => { acc.otp_prefix = otpInput.value || null; };
+                otpTd.appendChild(otpInput);
+
+                const vpnTd = document.createElement('td');
+                vpnTd.appendChild(createVpnTable(acc.vpn, () => {}));
+
+                const feeTd = document.createElement('td');
+                if (!acc.fee_payments) acc.fee_payments = [];
+                feeTd.appendChild(createFeeTable(acc.fee_payments, () => {}));
+
+                const delTd = document.createElement('td');
+                if (permissions.edit) {
+                    const delBtn = document.createElement('button');
+                    delBtn.textContent = 'Delete';
+                    delBtn.onclick = () => { const idx = accounts.indexOf(acc); accounts.splice(idx, 1); tr.remove(); };
+                    delTd.appendChild(delBtn);
+                }
+
+                tr.append(usernameTd, telegramTd, decentralaTd, residentTd, otpTd, vpnTd, feeTd, delTd);
+                tbody.appendChild(tr);
+            }
+
+            accounts.forEach(addRow);
+            table.appendChild(tbody);
+            $('content').appendChild(table);
+
+            if (permissions.new) {
+                const addBtn = document.createElement('button');
+                addBtn.textContent = '+ Account';
+                addBtn.onclick = () => {
+                    const newAcc = { username: '', telegram: null, decentrala: false, resident: false, otp_prefix: null, vpn: [], fee_payments: [] };
+                    accounts.push(newAcc);
+                    addRow(newAcc);
+                };
+                $('content').appendChild(addBtn);
+            }
+
+            if (permissions.edit) {
+                const saveBtn = document.createElement('button');
+                saveBtn.textContent = 'Save';
+                saveBtn.style.marginLeft = '10px';
+                saveBtn.onclick = async () => {
+                    const payload = { meta: data.meta, accounts };
+                    const result = await api('POST', payload);
+                    if (result && result.ok) location.reload();
+                };
+                $('content').appendChild(saveBtn);
+            }
+        }
+
+        async function loadAccounts() {
+            $('error').innerHTML = '';
+            $('content').innerHTML = '';
+            await fetchMe();
+            if (!localStorage.getItem('apiKey')) return;
+            const data = await api('GET');
+            if (data) renderTable(data);
+        }
+
+        updateAuthBtn();
+        loadAccounts();
+    </script>
+</body>
+</html>

@@ -1,12 +1,14 @@
 import hashlib
+import hmac
 import json
 import os
 import re
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 from fastapi import Depends, FastAPI, HTTPException
-from fastapi.responses import PlainTextResponse, RedirectResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, field_validator, model_validator
 
@@ -35,6 +37,28 @@ def validate_keys() -> None:
 validate_keys()
 
 global_lock = threading.Lock()
+
+
+class FeePayment(BaseModel):
+    date: str
+    currency: str
+    amount: float
+
+    @field_validator("date")
+    @classmethod
+    def validate_date(cls, v: str) -> str:
+        try:
+            datetime.strptime(v, "%Y-%m-%d")
+        except ValueError:
+            raise ValueError("Date must be valid yyyy-mm-dd")
+        return v
+
+    @field_validator("currency")
+    @classmethod
+    def validate_currency(cls, v: str) -> str:
+        if v not in ("RSD", "EUR", "USD", "RUB", "ETH", "BTC"):
+            raise ValueError("Currency must be one of: RSD, EUR, USD, RUB, ETH, BTC")
+        return v
 
 
 class VPN(BaseModel):
@@ -68,6 +92,12 @@ class Account(BaseModel):
     resident: bool
     otp_prefix: str | None = None
     vpn: list[VPN] = []
+    fee_payments: list[FeePayment] = []
+
+    @model_validator(mode="after")
+    def sort_fee_payments(self) -> "Account":
+        self.fee_payments = sorted(self.fee_payments, key=lambda x: x.date)
+        return self
 
     @field_validator("username")
     @classmethod
@@ -155,14 +185,30 @@ security = HTTPBearer()
 
 def verify_read_key(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
     token = credentials.credentials
-    if token not in (READ_KEY, WRITE_KEY, DECENTRALA_ELECTION_KEY):
+    if not any(
+        hmac.compare_digest(token, key)
+        for key in (READ_KEY, WRITE_KEY, DECENTRALA_ELECTION_KEY)
+    ):
         raise HTTPException(status_code=401, detail="Invalid API key or insufficient permissions")
     return token
 
 
 def verify_write_key(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
     token = credentials.credentials
-    if token not in (WRITE_KEY, DECENTRALA_ELECTION_KEY):
+    if not any(
+        hmac.compare_digest(token, key)
+        for key in (WRITE_KEY, DECENTRALA_ELECTION_KEY)
+    ):
+        raise HTTPException(status_code=401, detail="Invalid API key or insufficient permissions")
+    return token
+
+
+def verify_full_read_key(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
+    token = credentials.credentials
+    if not any(
+        hmac.compare_digest(token, key)
+        for key in (READ_KEY, WRITE_KEY)
+    ):
         raise HTTPException(status_code=401, detail="Invalid API key or insufficient permissions")
     return token
 
@@ -171,15 +217,15 @@ app = FastAPI()
 
 
 @app.get("/", include_in_schema=False)
-def root() -> RedirectResponse:
-    return RedirectResponse(url="/docs")
+def root() -> FileResponse:
+    return FileResponse(Path(__file__).parent / "index.html")
 
 
 @app.get("/accounts")
 def get_accounts(token: str = Depends(verify_read_key)) -> PlainTextResponse:
     content, _ = get_latest_content()
 
-    if token == DECENTRALA_ELECTION_KEY:
+    if hmac.compare_digest(token, DECENTRALA_ELECTION_KEY):
         data = json.loads(content)
         data["meta"] = {"unixtime": 0, "last_sha256": STUB_SHA256}
         data["accounts"] = [acc for acc in data["accounts"] if acc.get("decentrala")]
@@ -193,7 +239,7 @@ def post_accounts(payload: AccountStore, token: str = Depends(verify_write_key))
     with global_lock:
         current_content, current_sha256 = get_latest_content()
 
-        if token == DECENTRALA_ELECTION_KEY:
+        if hmac.compare_digest(token, DECENTRALA_ELECTION_KEY):
             current_data = json.loads(current_content)
             current_store = AccountStore.model_validate(current_data)
 
@@ -221,8 +267,30 @@ def post_accounts(payload: AccountStore, token: str = Depends(verify_write_key))
         return PlainTextResponse(content='{"ok":true}', media_type="application/json")
 
 
+@app.get("/me")
+def get_me(token: str = Depends(verify_read_key)) -> dict:
+    if hmac.compare_digest(token, WRITE_KEY):
+        return {"access": "read-write", "edit": True, "new": True}
+    elif hmac.compare_digest(token, DECENTRALA_ELECTION_KEY):
+        return {"access": "decentrala election (just residency edit)", "edit": True, "new": False}
+    else:
+        return {"access": "read-only", "edit": False, "new": False}
+
+
+@app.get("/otp")
+def get_otp(_: str = Depends(verify_full_read_key)) -> dict:
+    content, _ = get_latest_content()
+    data = json.loads(content)
+    residents = [
+        acc["otp_prefix"]
+        for acc in data["accounts"]
+        if acc.get("resident") and acc.get("otp_prefix")
+    ]
+    return {"version_unixtime": data["meta"]["unixtime"], "residents": residents}
+
+
 @app.get("/dump")
-def get_dump(_: str = Depends(verify_read_key)) -> dict[str, str]:
+def get_dump(_: str = Depends(verify_full_read_key)) -> dict[str, str]:
     return get_all_versions()
 
 
