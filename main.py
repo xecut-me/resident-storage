@@ -106,6 +106,19 @@ class Account(BaseModel):
             raise ValueError("Username cannot be empty")
         return v
 
+    @field_validator("otp_prefix")
+    @classmethod
+    def validate_otp_prefix(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if not v:
+            raise ValueError("OTP prefix cannot be empty string")
+        if not re.match(r"^[0123456789PTMBOSLA]+$", v):
+            raise ValueError("OTP prefix must only contain: 0123456789PTMBOSLA")
+        if v.startswith("P"):
+            raise ValueError("OTP prefix cannot start with P")
+        return v
+
 
 class Meta(BaseModel):
     unixtime: int

@@ -91,6 +91,97 @@ All data is cryptographically chained - each version references the SHA256 hash 
 3. Verify cryptographic chain if it is capable of doing so
 4. Validate data before use
 
+## Designing data consumers
+
+Create ./config.json and ./resident-data and run python3 poll.py, make your command read ./resident-data/last.json
+
+Config example
+
+{
+    "resident_storage_url": "https://example.com/accounts",
+    "resident_storage_api_key",
+
+    "strict_validation": true to fail if update chain is broken,
+    "on_update_command": "python3 update-vpn.py",
+
+    "telegram_api_key": optional,
+    "telegram_notify": [
+        {
+            "chat_id",
+            "topic_id": optional
+        }
+    ]
+}
+
+### How its coded
+
+resident-data is basically a copy of ./data on server of unixtime-sha256.json files + last.json that is a copy of last json.  
+
+poll.py each 10 minutes spawns a task, with catch-all & print exception, each task should finish in 5 minutes and 5 more minutes update process may run via on_update_command.  
+
+Task fetches resident_storage_url/accounts with Authorization Bearer resident_storage_api_key and compares with last.json.  
+If sha256 of result it got is exactly same as sha256 of last.json contents, than short-circuit exit.  
+If result's .meta.last_sha256 is same as sha256 of last.json contents that this is valid transition.  
+
+In case of valid transition or (invalid transition + strict_validation: false) we then spawn a task with on_update_command with timeout. Also new file is written and last.json is updated.  
+
+In case of invalid transition we start full chain check by requesting GET /dump and reading all unixtime-sha256.json in resident-data, 5 min timeout still apply.  
+
+When checking, chain of hashes server responded should have same start as recorded chain. In this case we write another files, update last.json and go valid way. If something not matches we fail validation and do not update, do not trigger on_update_command.  
+
+Do not repeat yourself when coding.  
+
+When first encountered invalid chain or when transition happened to new version, or in case transition happened but on_update_command exited non-zero, send a telegram notification using telegram_api_key, chat_id, topic_id.  
+
+Send telegram message only on final actions, not checking full chain that may be valid if 2+ updates posted in one cycle.  
+
+Encounter chain validation fail only in strict_validation mode.  
+
+Use aiohttp==3.13.3  
+
+### Update VPN consumer
+
+This consumer update-vpn.py should read ./resident-data/last.json, get a dict of ip: key, override config.vpn_admin_ip with config.vpn_admin_public_key so control plane is separated from data plane.  
+
+Validare ip's to be unique 192.168.11.x where 2 <= x <= 250 and keys unique ^[A-Za-z0-9+/]{43}=?$
+
+When editing, use this template, config should be saved in a temp file and then sudo mv to /etc/wireguard/wg0.conf. 
+
+```
+[Interface]
+PrivateKey = [config.vpn_private_key]
+Address = 192.168.11.1/24
+ListenPort = [config.vpn_port]
+
+PostUp = iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+PostDown = iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE
+
+[Peer]
+PublicKey = [wg_public_key]
+AllowedIPs = [wg_ip]/32
+```
+
+And finally verify and run "sudo service wg-quick@wg0 reload", if not valid, revert.  
+
+Admin key and ip is already in last.json, you need literally override it in dict generated and do it even if read failed and there are no peer so admin will be always able to VPN into server and fix broken updater, no softlock should be possible.  
+
+TODO: Notify telegram.  
+
+### [WIP] Update telegram IDs consumer
+
+This consumer update-telegram-ids.py should read ./resident-data/last.json same as VPN consumer, but it takes accounts where telegram and otp_prefix are set.  
+
+It reads /homeassistant/automations.yaml that is list, finds one that is "alias": "Record on CODE" and its.  
+
+```
+actions:
+- variables:
+    uid_map:
+    'otp_prefix': telegram
+```
+
+Updates it and reloads home assistant.
+
 ## Developer documentation
 
 All code was generated based on a hand written developer documentation by Claude Code Opus 4.5. Code was human reviewed for sanity and security to prevent logic errors and language misuse.  
@@ -145,7 +236,7 @@ When writing, take last file as base and use just payload's resident field of de
             "telegram": unique optional str,
             "decentrala": bool,
             "resident": bool,
-            "otp_prefix": unique optional str,
+            "otp_prefix": unique optional str consist from 0123456789PTMBOSLA symbols cant start with P,
             "vpn": [
                 {
                     "ip": unique 192.168.11.x where 2 <= x <= 250,
