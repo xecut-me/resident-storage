@@ -42,6 +42,7 @@ After logging in, you'll see a table with the following columns:
 - **Resident** - Current residency status
 - **OTP Prefix** - One-time key prefix for accessing a hackspace door
 - **VPN** - List of VPN configurations, for each device (IP address and WireGuard public key)
+- **SSH Keys** - List of SSH public keys for server access
 - **Fee Payments** - Payment history with date, currency, and amount
 
 #### Editing Accounts
@@ -57,6 +58,12 @@ If you have edit permissions:
 - Enter the IP address (format: `192.168.11.x` where x is 2-250)
 - Enter the WireGuard public key
 - Click **X** to remove a VPN entry
+
+#### Managing SSH Keys
+
+- Click **+ SSH** to add a new SSH public key
+- Enter the SSH public key (OpenSSH format, e.g., `ssh-ed25519 AAAA...`)
+- Click **X** to remove an SSH key entry
 
 #### Managing Fee Payments
 
@@ -80,7 +87,6 @@ If you have full write access:
 | `/accounts` | POST | Update accounts |
 | `/dump` | GET | Get all historical versions, use this for crypto chain verification |
 | `/me` | GET | Check your access level and permissions |
-| `/otp` | GET | Get OTP prefixes for all residents |
 
 ### Data Integrity
 
@@ -91,7 +97,7 @@ All data is cryptographically chained - each version references the SHA256 hash 
 3. Verify cryptographic chain if it is capable of doing so
 4. Validate data before use
 
-## Designing data consumers
+## [WIP] Designing data consumers
 
 Create ./config.json and ./resident-data and run python3 poll.py, make your command read ./resident-data/last.json
 
@@ -167,7 +173,7 @@ Admin key and ip is already in last.json, you need literally override it in dict
 
 TODO: Notify telegram.  
 
-### [WIP] Update telegram IDs consumer
+### Update telegram IDs consumer
 
 This consumer update-telegram-ids.py should read ./resident-data/last.json same as VPN consumer, but it takes accounts where telegram and otp_prefix are set.  
 
@@ -214,7 +220,6 @@ GET /accounts - return last JSON file contents, do not re-serialize so hashes wi
 POST /accounts - validate, serialize and save new version into file, return {ok: true}.  
 GET /dump - return a dict with all versions, key = filename, value = string of file content.  
 GET /me - returns {access: "read-only" | "read-write" | "decentrala election (just residency edit)", edit: true/false, new: true/false}  
-GET /otp - return {version_unixtime, residents: ["", ...]} thats otp_prefix of all resident: true  
 
 #### Decentrala key
 
@@ -242,6 +247,9 @@ When writing, take last file as base and use just payload's resident field of de
                     "ip": unique 192.168.11.x where 2 <= x <= 250,
                     "wg_public_key": unique ^[A-Za-z0-9+/]{43}=?$
                 }
+            ],
+            "ssh_keys": [
+                unique str one line starts sk- or ssh-
             ],
             "fee_payments": [
                 {
@@ -293,7 +301,8 @@ telegram text input, is empty sent as null
 decentrala checkbox  
 resident checkbox  
 otp_prefix text input, is empty sent as null  
-vpn table itself of ip (default value 192.168.11.x) and wg_public_key, when newly created, no lines by default  
+vpn table itself of ip (default value 192.168.11.x) and wg_public_key, when newly created, no lines by default
+ssh_keys table of public keys in OpenSSH format, when newly created, no lines by default
 fee_payments table itself of date, currency dropdown, amount
 
 State is stored in HTML itself, when rendering table build it from scrath using innerText and value.  

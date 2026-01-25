@@ -92,6 +92,7 @@ class Account(BaseModel):
     resident: bool
     otp_prefix: str | None = None
     vpn: list[VPN] = []
+    ssh_keys: list[str] = []
     fee_payments: list[FeePayment] = []
 
     @model_validator(mode="after")
@@ -119,6 +120,16 @@ class Account(BaseModel):
             raise ValueError("OTP prefix cannot start with P")
         return v
 
+    @field_validator("ssh_keys")
+    @classmethod
+    def validate_ssh_keys(cls, v: list[str]) -> list[str]:
+        for key in v:
+            if "\n" in key:
+                raise ValueError("SSH key must be a single line")
+            if not (key.startswith("sk-") or key.startswith("ssh-")):
+                raise ValueError("SSH key must start with sk- or ssh-")
+        return v
+
 
 class Meta(BaseModel):
     unixtime: int
@@ -136,6 +147,7 @@ class AccountStore(BaseModel):
         otp_prefixes: list[str] = []
         ips: list[str] = []
         wg_keys: list[str] = []
+        ssh_keys: list[str] = []
 
         for account in self.accounts:
             usernames.append(account.username)
@@ -146,6 +158,7 @@ class AccountStore(BaseModel):
             for vpn in account.vpn:
                 ips.append(vpn.ip)
                 wg_keys.append(vpn.wg_public_key)
+            ssh_keys.extend(account.ssh_keys)
 
         if len(usernames) != len(set(usernames)):
             raise ValueError("Usernames must be unique")
@@ -157,6 +170,8 @@ class AccountStore(BaseModel):
             raise ValueError("VPN IPs must be unique")
         if len(wg_keys) != len(set(wg_keys)):
             raise ValueError("WireGuard public keys must be unique")
+        if len(ssh_keys) != len(set(ssh_keys)):
+            raise ValueError("SSH keys must be unique")
 
         return self
 
@@ -288,18 +303,6 @@ def get_me(token: str = Depends(verify_read_key)) -> dict:
         return {"access": "decentrala election (just residency edit)", "edit": True, "new": False}
     else:
         return {"access": "read-only", "edit": False, "new": False}
-
-
-@app.get("/otp")
-def get_otp(_: str = Depends(verify_full_read_key)) -> dict:
-    content, _ = get_latest_content()
-    data = json.loads(content)
-    residents = [
-        acc["otp_prefix"]
-        for acc in data["accounts"]
-        if acc.get("resident") and acc.get("otp_prefix")
-    ]
-    return {"version_unixtime": data["meta"]["unixtime"], "residents": residents}
 
 
 @app.get("/dump")

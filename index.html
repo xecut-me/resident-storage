@@ -12,6 +12,7 @@
         input[type="text"] { width: 150px; }
         .vpn-table { margin: 5px 0; }
         .vpn-table input { width: 120px; }
+        .ssh-table input { width: 250px; }
         .fee-table input[type="text"], .fee-table input[type="date"] { width: 100px; }
         .fee-table input[type="number"] { width: 80px; }
         button { cursor: pointer; }
@@ -138,6 +139,47 @@
             return container;
         }
 
+        function createSshTable(keys, onChange) {
+            const container = document.createElement('div');
+
+            function render() {
+                container.innerHTML = '';
+                const table = document.createElement('table');
+                table.className = 'ssh-table';
+
+                keys.forEach((key, i) => {
+                    const tr = document.createElement('tr');
+
+                    const keyTd = document.createElement('td');
+                    const keyInput = document.createElement('input');
+                    keyInput.type = 'text';
+                    keyInput.value = key;
+                    keyInput.placeholder = 'ssh-ed25519 AAAA...';
+                    keyInput.oninput = () => { keys[i] = keyInput.value; onChange(); };
+                    keyTd.appendChild(keyInput);
+
+                    const delTd = document.createElement('td');
+                    const delBtn = document.createElement('button');
+                    delBtn.textContent = 'X';
+                    delBtn.onclick = () => { keys.splice(i, 1); render(); onChange(); };
+                    delTd.appendChild(delBtn);
+
+                    tr.append(keyTd, delTd);
+                    table.appendChild(tr);
+                });
+
+                container.appendChild(table);
+
+                const addBtn = document.createElement('button');
+                addBtn.textContent = '+ SSH';
+                addBtn.onclick = () => { keys.push(''); render(); onChange(); };
+                container.appendChild(addBtn);
+            }
+
+            render();
+            return container;
+        }
+
         function createFeeTable(fees, onChange) {
             const container = document.createElement('div');
             const currencies = ['RSD', 'EUR', 'USD', 'RUB', 'ETH', 'BTC'];
@@ -206,7 +248,7 @@
             const table = document.createElement('table');
             const thead = document.createElement('thead');
             const headerRow = document.createElement('tr');
-            ['Username', 'Telegram', 'Decentrala', 'Resident', 'OTP Prefix', 'VPN', 'Fee Payments', ''].forEach(text => {
+            ['Username', 'Telegram', 'Decentrala', 'Resident', 'OTP Prefix', 'VPN', 'SSH Keys', 'Fee Payments', ''].forEach(text => {
                 const th = document.createElement('th');
                 th.innerText = text;
                 headerRow.appendChild(th);
@@ -257,6 +299,10 @@
                 const vpnTd = document.createElement('td');
                 vpnTd.appendChild(createVpnTable(acc.vpn, () => {}));
 
+                const sshTd = document.createElement('td');
+                if (!acc.ssh_keys) acc.ssh_keys = [];
+                sshTd.appendChild(createSshTable(acc.ssh_keys, () => {}));
+
                 const feeTd = document.createElement('td');
                 if (!acc.fee_payments) acc.fee_payments = [];
                 feeTd.appendChild(createFeeTable(acc.fee_payments, () => {}));
@@ -269,7 +315,7 @@
                     delTd.appendChild(delBtn);
                 }
 
-                tr.append(usernameTd, telegramTd, decentralaTd, residentTd, otpTd, vpnTd, feeTd, delTd);
+                tr.append(usernameTd, telegramTd, decentralaTd, residentTd, otpTd, vpnTd, sshTd, feeTd, delTd);
                 tbody.appendChild(tr);
             }
 
@@ -281,7 +327,7 @@
                 const addBtn = document.createElement('button');
                 addBtn.textContent = '+ Account';
                 addBtn.onclick = () => {
-                    const newAcc = { username: '', telegram: null, decentrala: false, resident: false, otp_prefix: null, vpn: [], fee_payments: [] };
+                    const newAcc = { username: '', telegram: null, decentrala: false, resident: false, otp_prefix: null, vpn: [], ssh_keys: [], fee_payments: [] };
                     accounts.push(newAcc);
                     addRow(newAcc);
                 };
