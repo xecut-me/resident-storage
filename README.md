@@ -220,6 +220,28 @@ GET /accounts - return last JSON file contents, do not re-serialize so hashes wi
 POST /accounts - validate, serialize and save new version into file, return {ok: true}.  
 GET /dump - return a dict with all versions, key = filename, value = string of file content.  
 GET /me - returns {access: "read-only" | "read-write" | "decentrala election (just residency edit)", edit: true/false, new: true/false}  
+GET /export/vpn - returns VPN config based on accounts, only that has  
+GET /export/otp-map - returns OTP user map based on accounts  
+
+#### VPN example
+
+```
+# wg-xecut-resident-vpn-telegram_username.conf
+[Peer]
+PublicKey = redacted
+AllowedIPs = 192.168.11.x/32
+
+# wg-xecut-vpn-telegram_username.conf
+[Peer]
+...
+```
+
+#### OTP map example (yaml part with padding)
+
+```
+      uid_map:
+        'OTP_PREFIX': telegram_username
+```
 
 #### Decentrala key
 

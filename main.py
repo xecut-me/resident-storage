@@ -310,6 +310,45 @@ def get_dump(_: str = Depends(verify_full_read_key)) -> dict[str, str]:
     return get_all_versions()
 
 
+@app.get("/export/vpn")
+def export_vpn(_: str = Depends(verify_full_read_key)) -> PlainTextResponse:
+    content, _ = get_latest_content()
+    data = json.loads(content)
+    store = AccountStore.model_validate(data)
+
+    lines = []
+    for account in store.accounts:
+        if not account.vpn:
+            continue
+
+        identifier = account.telegram or account.username
+        vpn_type = "resident-vpn" if account.resident else "vpn"
+
+        for vpn in account.vpn:
+            lines.append(f"""# wg-xecut-{vpn_type}-{identifier}.conf
+[Peer]
+PublicKey = {vpn.wg_public_key}
+AllowedIPs = {vpn.ip}/32""")
+
+    return PlainTextResponse(content="\n\n".join(lines), media_type="text/plain")
+
+
+@app.get("/export/otp-map")
+def export_otp_map(_: str = Depends(verify_full_read_key)) -> PlainTextResponse:
+    content, _ = get_latest_content()
+    data = json.loads(content)
+    store = AccountStore.model_validate(data)
+
+    lines = ["      uid_map:"]
+    for account in store.accounts:
+        if not account.otp_prefix or not account.telegram:
+            continue
+
+        lines.append(f"        '{account.otp_prefix}': {account.telegram}")
+
+    return PlainTextResponse(content="\n".join(lines), media_type="text/plain")
+
+
 if __name__ == "__main__":
     import uvicorn
 
